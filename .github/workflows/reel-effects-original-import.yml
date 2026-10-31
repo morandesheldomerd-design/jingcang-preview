@@ -1,0 +1,55 @@
+name: One-time original REEL effects import
+on:
+  push:
+    branches: [reel-effects-original-import-20261031]
+    paths: [.github/workflows/reel-effects-original-import.yml]
+permissions:
+  contents: write
+concurrency:
+  group: reel-effects-original-import-20261031
+  cancel-in-progress: false
+jobs:
+  import:
+    if: github.repository == 'morandesheldomerd-design/jingcang-preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Download exact originals, verify SHA256, stage only five files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, subprocess, urllib.request, base64
+          expected_repo = 'morandesheldomerd-design/jingcang-preview'
+          expected_branch = 'reel-effects-original-import-20261031'
+          assert os.environ['GITHUB_REPOSITORY'] == expected_repo
+          assert os.environ['GITHUB_REF'] == 'refs/heads/' + expected_branch
+          manifest = [{'id': '08', 'url': 'https://cdn.sanity.io/files/s479xw3z/production/768220fe22b2d9dff4977306fa068405994b43aa.mp4', 'sha256': '02c9398677bf4b5627a73dd2c9e193bdf4d20ce3112c86e9c04a6c3a39f51b4f'}, {'id': '09', 'url': 'https://cdn.sanity.io/files/s479xw3z/production/c2b54b8549907ab51742fc34bc8b2d5abf8a55bc.mp4', 'sha256': 'ee7064d6735ba9846f19ce35525c8238774957dcec9090ad79403e425f157da2'}, {'id': '11', 'url': 'https://cdn.sanity.io/files/s479xw3z/production/07a7fc44baddbdae5967c8c9f00cc3363ec9eb06.mp4', 'sha256': 'fa27366a46150070e64d8f8caa340aaf752fe2582e5d565ddead05cf18e8f387'}, {'id': '15', 'url': 'https://cdn.sanity.io/files/s479xw3z/production/d631c12893573409371446b68dd5a1954484b8bd.mp4', 'sha256': '124c624e6454d3e170c8780689e0e9ae274c76e0036e7db332e260049905fed6'}, {'id': '16', 'url': 'https://cdn.sanity.io/files/s479xw3z/production/bd840b9a8b1fbbab68b0fc4d752b20298c474009.mp4', 'sha256': '3cb9117c9d9db2a17740046d23dd91fe41288c887262e1b48bdd424906757f13'}]
+          paths = []
+          for item in manifest:
+              path = pathlib.Path('preview/media/effects-seedance4k') / (item['id'] + '.mp4')
+              assert not path.exists(), 'Unexpected existing target: ' + str(path)
+              path.parent.mkdir(parents=True, exist_ok=True)
+              digest = hashlib.sha256()
+              with urllib.request.urlopen(item['url'], timeout=90) as response, path.open('wb') as output:
+                  while True:
+                      chunk = response.read(1024 * 1024)
+                      if not chunk: break
+                      digest.update(chunk)
+                      output.write(chunk)
+              assert digest.hexdigest() == item['sha256'], 'Hash mismatch: ' + item['id']
+              paths.append(str(path))
+              print(item['id'], 'verified', digest.hexdigest(), flush=True)
+          subprocess.run(['git', 'add', '--'] + paths, check=True)
+          staged = subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()
+          assert sorted(staged) == sorted(paths), staged
+          subprocess.run(['git', '-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com', 'commit', '-m', 'Stage five SHA256-verified original REEL effects videos'], check=True)
+          # Credential exists only in child process environment; never in a file or remote URL.
+          auth = base64.b64encode(('x-access-token:' + os.environ['GH_TOKEN']).encode()).decode()
+          env = os.environ.copy()
+          env.update({'GIT_CONFIG_COUNT':'1', 'GIT_CONFIG_KEY_0':'http.https://github.com/.extraheader', 'GIT_CONFIG_VALUE_0':'AUTHORIZATION: basic ' + auth})
+          subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/' + expected_branch], check=True, env=env)
